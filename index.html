@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="비용정산">
+<meta name="description" content="법인카드 영수증 사진으로 정산 엑셀(.xlsx)과 영수증 PPT(.pptx)를 만드는 앱">
+<title>개인비용 정산</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="icons/icon-192.png" alt="" width="34" height="34">
+    <div>
+      <h1>개인비용 정산</h1>
+      <p id="subtitle">영수증 → 엑셀 · PPT</p>
+    </div>
+  </div>
+  <button id="btnSettings" class="icon-btn" type="button" aria-label="설정">⚙︎</button>
+</header>
+
+<main id="main">
+  <nav class="monthbar" id="monthbar" aria-label="정산 월"></nav>
+  <section class="summary" id="summary" aria-live="polite"></section>
+  <section id="list" class="list"></section>
+  <div class="addrow">
+    <button id="btnAdd" class="add-btn" type="button">
+      <span class="plus">＋</span> 영수증 사진 추가
+    </button>
+    <input id="fileInput" type="file" accept="image/*" multiple hidden>
+    <p class="hint">사진은 이 기기에만 저장됩니다. 여러 장을 한 번에 고를 수 있어요.</p>
+  </div>
+</main>
+
+<footer class="dock">
+  <div class="dock-row">
+    <div class="dock-total">
+      <span id="dockCount">0건</span>
+      <strong id="dockTotal">0원</strong>
+    </div>
+    <div class="dock-actions">
+      <button id="btnExcel" class="btn ghost" type="button">📊 엑셀</button>
+      <button id="btnPpt" class="btn primary" type="button">🖼️ PPT</button>
+    </div>
+  </div>
+</footer>
+
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<section class="sheet" id="sheet" hidden aria-modal="true" role="dialog" aria-label="설정">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head">
+    <h2>설정</h2>
+    <button id="btnCloseSheet" class="icon-btn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <div class="sheet-body">
+    <p class="sheet-note">아래 값은 <b>이 기기(브라우저)에만</b> 저장되고, 만든 엑셀·PPT 안에만 들어갑니다. 비워 두어도 앱은 그대로 동작합니다.</p>
+    <div class="field-grid">
+      <label class="field"><span>회사명</span><input id="setCompany" type="text" autocomplete="organization" placeholder="예: 회사명"></label>
+      <label class="field"><span>사원명</span><input id="setEmployee" type="text" autocomplete="name" placeholder="예: 홍길동"></label>
+      <label class="field"><span>부서명</span><input id="setDepartment" type="text" placeholder="예: SCM"></label>
+      <label class="field"><span>입금 계좌번호</span><input id="setAccount" type="text" inputmode="numeric" placeholder="숫자와 - 만"></label>
+      <label class="field"><span>은행명</span><input id="setBank" type="text" placeholder="예: 국민은행"></label>
+    </div>
+
+    <div class="tpl-box">
+      <h3>내 회사 엑셀 양식</h3>
+      <p class="tpl-help">회사에서 쓰는 정산 양식(.xlsx)을 한 번 올려 두면, 원본 시트와 수식을 그대로 둔 채 <code>Expense Claim</code> 시트의 10~59행만 채워서 내려받습니다. 올리지 않으면 앱에 들어 있는 기본 양식으로 만듭니다.</p>
+      <div class="tpl-row">
+        <button id="btnTemplate" class="btn small" type="button">양식 올리기</button>
+        <button id="btnTemplateClear" class="btn small ghost" type="button" hidden>양식 지우기</button>
+        <input id="templateInput" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+      </div>
+      <p id="tplStatus" class="tpl-status">올린 양식 없음 · 기본 양식 사용</p>
+    </div>
+
+    <div class="danger-box">
+      <h3>데이터</h3>
+      <p class="tpl-help">영수증 사진과 입력한 항목은 이 기기에만 남습니다. 서버로 보내지 않습니다.</p>
+      <button id="btnReset" class="btn small danger" type="button">이 달 항목 모두 지우기</button>
+    </div>
+  </div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<section class="sheet small-sheet" id="monthSheet" hidden aria-modal="true" role="dialog" aria-label="정산 월 선택">
+  <div class="sheet-grip"></div>
+  <div class="sheet-head">
+    <h2>정산 월 선택</h2>
+    <button id="btnCloseMonth" class="icon-btn" type="button" aria-label="닫기">✕</button>
+  </div>
+  <div class="ms-year">
+    <button type="button" class="tool" data-ystep="-1" aria-label="이전 해">‹</button>
+    <strong id="msYear">2026</strong>
+    <button type="button" class="tool" data-ystep="1" aria-label="다음 해">›</button>
+  </div>
+  <div class="ms-grid" id="msGrid"></div>
+</section>
+
+<script src="vendor/jszip.min.js"></script>
+<script src="xlsx.js"></script>
+<script src="pptx.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
