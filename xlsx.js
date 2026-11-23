@@ -213,7 +213,7 @@
     }
     if (!pick) pick = sheets[0];
     if (!pick.path || !zip.file(pick.path)) throw new Error('정산 시트를 읽지 못했습니다.');
-    return { path: pick.path, sheets: sheets, wbXml: wbXml };
+    return { path: pick.path, name: pick.name, sheets: sheets, wbXml: wbXml };
   }
 
   function sheet_equals(a, b) {
@@ -338,6 +338,15 @@
       var zip = await JSZip.loadAsync(buf);
       var found = await locateSheet(zip, 'Expense Claim');
       return found.sheets.map(function (s) { return s.name; });
+    },
+    inspect: async function (buf) {
+      var zip = await JSZip.loadAsync(buf);
+      var found = await locateSheet(zip, 'Expense Claim');
+      return {
+        sheets: found.sheets.map(function (s) { return s.name; }),
+        target: found.name,
+        exact: String(found.name).trim().toLowerCase() === 'expense claim'
+      };
     },
     _setCell: function (xml, ref, val) { return setCell(xml, ref, val); }
   };

@@ -862,7 +862,8 @@
     var clearBtn = $('#btnTemplateClear');
     if (!el) return;
     if (state.settings.template && state.settings.template.data) {
-      el.textContent = '✓ ' + state.settings.template.name + ' 사용 중';
+      el.textContent = '✓ ' + state.settings.template.name + ' 사용 중' +
+        (state.settings.template.target ? ' (' + state.settings.template.target + ' 시트)' : '');
       el.classList.add('ok');
       clearBtn.hidden = false;
     } else {
@@ -897,12 +898,21 @@
       if (!/\.xlsx$/i.test(file.name)) { toast('xlsx 파일만 올릴 수 있습니다.', 'err'); return; }
       try {
         var buf = await file.arrayBuffer();
-        var sheets = await XLSXKit.listSheets(buf);
-        if (!sheets.length) throw new Error('시트가 없습니다.');
-        state.settings.template = { name: file.name, data: bufToBase64(buf), sheets: sheets };
+        var info = await XLSXKit.inspect(buf);
+        if (!info.sheets.length) throw new Error('시트가 없습니다.');
+        state.settings.template = {
+          name: file.name,
+          data: bufToBase64(buf),
+          sheets: info.sheets,
+          target: info.target
+        };
         save();
         updateTplStatus();
-        toast('양식을 저장했습니다. 이제 이 양식(Expense Claim 시트)으로 만듭니다.');
+        if (info.exact) {
+          toast('양식을 저장했습니다. 이제 이 양식(Expense Claim 시트)으로 만듭니다.');
+        } else {
+          toast('저장했습니다. 다만 ‘Expense Claim’ 시트가 없어 ‘' + info.target + '’ 시트를 채웁니다.', 'err');
+        }
       } catch (err) {
         console.error(err);
         toast('엑셀 양식으로 읽지 못했습니다. .xlsx 파일인지 확인해 주세요.', 'err');
