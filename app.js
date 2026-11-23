@@ -212,28 +212,23 @@
   /* ------------------------------------------------------------------ */
 
   function loadBitmap(file) {
+    /* <img> 를 먼저 쓴다: Safari·Chrome 모두 EXIF 회전을 반영해 그려 준다(아이폰 HEIC 포함).
+       실패하면 createImageBitmap 으로 한 번 더 시도한다. */
     return new Promise(function (resolve, reject) {
-      if (window.createImageBitmap) {
-        Promise.resolve()
-          .then(function () { return createImageBitmap(file, { imageOrientation: 'from-image' }); })
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        resolve(img);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        if (!window.createImageBitmap) { reject(new Error('이미지를 읽지 못했습니다.')); return; }
+        createImageBitmap(file, { imageOrientation: 'from-image' })
           .then(resolve)
-          .catch(function () { loadViaImg(); });
-        return;
-      }
-      loadViaImg();
-      function loadViaImg() {
-        var url = URL.createObjectURL(file);
-        var img = new Image();
-        img.onload = function () {
-          setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-          resolve(img);
-        };
-        img.onerror = function () {
-          URL.revokeObjectURL(url);
-          reject(new Error('이미지를 읽지 못했습니다.'));
-        };
-        img.src = url;
-      }
+          .catch(function () { reject(new Error('이미지를 읽지 못했습니다.')); });
+      };
+      img.src = url;
     });
   }
 
