@@ -1162,6 +1162,19 @@
 
   function registerSW() {
     if (!('serviceWorker' in navigator)) return;
+    /* 이미 홈 화면 앱으로 쓰던 사람도 새 버전이 바로 보이게: 새 서비스워커가 이 화면을 넘겨받으면
+       (그리고 아직 아무것도 만지지 않았을 때만) 한 번 새로 고침한다. */
+    var hadController = !!navigator.serviceWorker.controller;
+    var reloaded = false;
+    var touched = false;
+    ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
+      window.addEventListener(ev, function () { touched = true; }, { once: true, passive: true });
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloaded || touched) return;
+      reloaded = true;
+      location.reload();
+    });
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});
     });
