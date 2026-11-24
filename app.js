@@ -337,6 +337,37 @@
     return html;
   }
 
+  function ocrNoteText(it) {
+    switch (it.ocrState) {
+      case 'pending':
+      case 'running':
+        return { cls: 'busy', text: it.ocrMsg || '금액 읽는 중…' };
+      case 'done':
+        return { cls: 'ok', text: it.ocrDate ? '금액·날짜 자동 입력됨 · 확인해 주세요' : '자동 입력됨 · 확인해 주세요' };
+      case 'guess':
+        return { cls: 'warn', text: '합계 표시를 못 찾아 ' + won(it.ocrAmount) + '원으로 넣었습니다 · 확인해 주세요' };
+      case 'kept':
+        return { cls: 'ok', text: '영수증 금액 ' + won(it.ocrAmount) + '원 · 직접 입력한 금액 그대로' };
+      case 'none':
+        return { cls: 'warn', text: '금액을 찾지 못했습니다 · 직접 입력해 주세요' };
+      case 'off':
+        return { cls: 'warn', text: '자동 인식 꺼짐 · 직접 입력해 주세요' };
+      case 'fail':
+        return { cls: 'warn', text: '자동 인식 실패 · 직접 입력해 주세요' };
+      default:
+        return null;
+    }
+  }
+
+  function ocrNoteHtml(it) {
+    var s = ocrNoteText(it);
+    if (!s) return '';
+    var retry = (it.ocrState === 'none' || it.ocrState === 'fail')
+      ? '<button type="button" class="ocr-retry" data-act="ocr">다시 읽기</button>' : '';
+    return '<div class="ocr-note ' + s.cls + '" data-ocr>' +
+      '<span class="dot"></span><span class="txt">' + esc(s.text) + '</span>' + retry + '</div>';
+  }
+
   function cardHtml(it, i) {
     var type = it.type || 'CC';
     return '' +
@@ -353,6 +384,7 @@
                 'placeholder="금액" value="' + (it.amount ? won(it.amount) : '') + '">' +
             '</div>' +
             '<select data-f="acct" aria-label="계정과목">' + acctSelectHtml(it) + '</select>' +
+            ocrNoteHtml(it) +
           '</div>' +
         '</div>' +
         '<div class="card-body">' +
@@ -436,15 +468,17 @@
     }
     toast(files.length + '장 불러오는 중…');
     var failed = 0;
+    var added = [];
     for (var k = 0; k < files.length; k++) {
       try {
         var proc = await processImage(files[k]);
         var id = uid();
         await dbPut({ id: id, blob: proc.blob, w: proc.w, h: proc.h, name: files[k].name, created: Date.now() });
         var preset = PRESETS.filter(function (p) { return p.code === state.lastAcct; })[0] || PRESETS[0];
-        month.items.push({
+        var auto = defaultDate();
+        var item = {
           id: id,
-          date: defaultDate(),
+          date: auto,
           amount: 0,
           detail: '',
           desc: preset.name,
@@ -455,8 +489,12 @@
           thumb: proc.thumb,
           w: proc.w,
           h: proc.h,
-          name: files[k].name
-        });
+          name: files[k].name,
+          dateAuto: auto,
+          ocrState: 'pending'
+        };
+        month.items.push(item);
+        added.push(item);
       } catch (e) {
         failed++;
       }
@@ -464,7 +502,172 @@
     save();
     renderAll();
     if (failed) toast(failed + '장은 읽지 못했습니다. (HEIC 형식은 아이폰 사파리에서만 열립니다)', 'err');
-    else toast(files.length + '장 추가했습니다. 금액과 세부내역을 채워 주세요.');
+    else toast(files.length + '장 추가했습니다.');
+    if (added.length) enqueueOcr(added);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* 영수증 금액 자동 인식 (브라우저 안 OCR)                               */
+  /* ------------------------------------------------------------------ */
+
+  var ocrQueue = [];
+  var ocrRunning = false;
+
+  function findItemAnywhere(id) {
+    var keys = Object.keys(state.months);
+    for (var k = 0; k < keys.length; k++) {
+      var bucket = state.months[keys[k]];
+      var items = (bucket && bucket.items) || [];
+      for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i];
+    }
+    return null;
+  }
+
+  function findCard(id) { return listEl.querySelector('.card[data-id="' + id + '"]'); }
+
+  function paintOcrNote(it, force) {
+    var card = findCard(it.id);
+    if (!card) return;
+    var box = card.querySelector('[data-ocr]');
+    var s = ocrNoteText(it);
+    if (!s) { if (box) box.remove(); return; }
+    if (!box) {
+      var fields = card.querySelector('.head-fields');
+      if (!fields) return;
+      box = document.createElement('div');
+      fields.appendChild(box);
+    }
+    box.className = 'ocr-note ' + s.cls;
+    box.setAttribute('data-ocr', '');
+    if (force || box.getAttribute('data-txt') !== s.text) {
+      box.innerHTML = '<span class="dot"></span><span class="txt">' + esc(s.text) + '</span>' +
+        ((it.ocrState === 'none' || it.ocrState === 'fail')
+          ? '<button type="button" class="ocr-retry" data-act="ocr">다시 읽기</button>' : '');
+      box.setAttribute('data-txt', s.text);
+    }
+  }
+
+  function enqueueOcr(items) {
+    if (!window.OCRKit) {
+      items.forEach(function (it) { it.ocrState = 'off'; paintOcrNote(it, true); });
+      save();
+      return;
+    }
+    items.forEach(function (it) {
+      it.ocrState = 'pending';
+      it.ocrMsg = '금액 읽는 중…';
+      paintOcrNote(it, true);
+      ocrQueue.push(it.id);
+    });
+    pumpOcr();
+  }
+
+  async function pumpOcr() {
+    if (ocrRunning) return;
+    ocrRunning = true;
+    var stat = { done: 0, kept: 0, miss: 0, fail: 0 };
+    try {
+      while (ocrQueue.length) {
+        var id = ocrQueue.shift();
+        var it = findItemAnywhere(id);
+        if (!it || (it.ocrState !== 'pending' && it.ocrState !== 'running')) continue;
+        await runOcr(it);
+        if (it.ocrState === 'done') stat.done++;
+        else if (it.ocrState === 'guess') stat.done++;
+        else if (it.ocrState === 'kept') stat.kept++;
+        else if (it.ocrState === 'none') stat.miss++;
+        else if (it.ocrState === 'fail') stat.fail++;
+      }
+    } finally {
+      ocrRunning = false;
+    }
+    var parts = [];
+    if (stat.done) parts.push('금액 자동 입력 ' + stat.done + '건');
+    if (stat.kept) parts.push('직접 입력 ' + stat.kept + '건 그대로');
+    if (stat.miss) parts.push('못 읽은 ' + stat.miss + '건');
+    if (stat.fail) parts.push('인식 실패 ' + stat.fail + '건');
+    if (parts.length) toast(parts.join(' · ') + ' — 금액을 확인해 주세요.');
+  }
+
+  async function runOcr(it) {
+    it.ocrState = 'running';
+    it.ocrMsg = '금액 읽는 중…';
+    save();
+    paintOcrNote(it, true);
+
+    var rec = null;
+    try { rec = await dbGet(it.id); } catch (e) { rec = null; }
+    if (!rec || !rec.blob) {
+      it.ocrState = 'fail';
+      save(); paintOcrNote(it, true);
+      return;
+    }
+
+    try {
+      var out = await window.OCRKit.recognize(rec.blob, function (status, progress) {
+        if (status === 'recognizing text' && progress > 0.02) {
+          var pct = Math.round(progress * 100);
+          if (it.ocrMsg !== '금액 읽는 중… ' + pct + '%') {
+            it.ocrMsg = '금액 읽는 중… ' + pct + '%';
+            paintOcrNote(it);
+          }
+        }
+      });
+      applyOcr(it, out && out.parsed ? out.parsed : null);
+    } catch (e) {
+      console.warn('OCR 실패:', e && e.message);
+      it.ocrState = 'fail';
+      it.ocrMsg = '';
+      save();
+      paintOcrNote(it, true);
+    }
+  }
+
+  function applyOcr(it, parsed) {
+    it.ocrMsg = '';
+    var picked = parsed && parsed.amount ? Number(parsed.amount) : 0;
+    it.ocrAmount = picked || null;
+
+    /* 이미 넣은 금액은 절대 덮지 않는다 */
+    if (picked && !it.amountTouched && !it.amount) {
+      it.amount = picked;
+      it.ocrState = (parsed.amountConfidence === 'low') ? 'guess' : 'done';
+      var card = findCard(it.id);
+      if (card) {
+        var input = card.querySelector('[data-f="amount"]');
+        if (input && document.activeElement !== input) {
+          input.value = won(picked);
+          input.classList.add('filled');
+          setTimeout(function () { input.classList.remove('filled'); }, 1500);
+        }
+      }
+    } else if (picked && (it.amountTouched || it.amount)) {
+      it.ocrState = 'kept';
+    } else {
+      it.ocrState = 'none';
+    }
+
+    /* 날짜: 비어 있거나 사용자가 손대지 않은 기본값일 때만, 그 달 안의 날짜일 때만 */
+    var pd = parsed && parsed.date; 
+    if (pd && parsed.dateConfidence === 'high' &&
+        (!it.date || (!it.dateTouched && it.date === it.dateAuto)) &&
+        String(pd).slice(0, 7) === state.active) {
+      it.date = pd;
+      it.ocrDate = pd;
+      var card2 = findCard(it.id);
+      if (card2) {
+        var dInput = card2.querySelector('[data-f="date"]');
+        if (dInput && document.activeElement !== dInput) {
+          dInput.value = pd;
+          dInput.classList.add('filled');
+          setTimeout(function () { dInput.classList.remove('filled'); }, 1500);
+        }
+      }
+    }
+
+    save();
+    paintOcrNote(it, true);
+    updateTotals();
   }
 
   function bindListEvents() {
@@ -476,10 +679,11 @@
       var it = findItem(card.getAttribute('data-id'));
       if (!it) return;
       var v = e.target.value;
-      if (field === 'date') it.date = v || it.date;
+      if (field === 'date') { it.date = v || it.date; it.dateTouched = true; }
       else if (field === 'amount') {
         var digits = v.replace(/[^0-9]/g, '');
         it.amount = Number(digits) || 0;
+        it.amountTouched = true;
         if (digits !== v) e.target.value = digits;
       } else if (field === 'persons') {
         it.persons = Number(v.replace(/[^0-9]/g, '')) || 1;
@@ -549,6 +753,15 @@
       var act = btn.getAttribute('data-act');
       var items = currentMonth().items;
 
+      if (act === 'ocr' && it) {
+        if (!window.OCRKit) { toast('이 브라우저에서는 자동 인식을 쓸 수 없습니다.', 'err'); return; }
+        it.ocrState = 'pending';
+        it.ocrMsg = '금액 읽는 중…';
+        save();
+        paintOcrNote(it, true);
+        enqueueOcr([it]);
+        return;
+      }
       if (act === 'type' && it) {
         it.type = btn.getAttribute('data-v');
         state.lastType = it.type;
@@ -959,9 +1172,26 @@
     bindListEvents();
     bindMonthEvents();
     bindSettings();
+    resetStaleOcr();
     renderAll();
     registerSW();
     if (!state.months[state.active]) { state.months[state.active] = { items: [] }; save(); }
+  }
+
+  /* 앱을 닫는 등으로 중간에 끝난 인식은 '직접 입력' 상태로 돌려 둔다 */
+  function resetStaleOcr() {
+    var changed = false;
+    Object.keys(state.months).forEach(function (k) {
+      var items = (state.months[k] && state.months[k].items) || [];
+      items.forEach(function (it) {
+        if (it.ocrState === 'running' || it.ocrState === 'pending') {
+          it.ocrState = (it.ocrAmount && it.amount) ? 'kept' : 'none';
+          it.ocrMsg = '';
+          changed = true;
+        }
+      });
+    });
+    if (changed) save();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

@@ -375,6 +375,52 @@ input:focus, select:focus { outline: 2px solid rgba(37, 99, 235, 0.35); outline-
 }
 .toast.err { background: rgba(153, 27, 27, 0.96); }
 
+/* ---------- 자동 인식 상태 ---------- */
+.ocr-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink-3);
+}
+.ocr-note .dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ocr-note .txt { min-width: 0; }
+.ocr-note.busy { color: var(--blue); }
+.ocr-note.busy .dot { animation: ocrPulse 1s ease-in-out infinite; }
+.ocr-note.ok { color: #15803d; }
+.ocr-note.warn { color: #b45309; }
+.ocr-retry {
+  flex: none;
+  margin-top: -2px;
+  border: 1px solid #e5c07b;
+  background: #fffbeb;
+  color: #92400e;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+@keyframes ocrPulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+input.filled { animation: ocrFill 1.4s ease-out; }
+@keyframes ocrFill {
+  0% { background: #dcfce7; border-color: #22c55e; }
+  100% { background: #fff; border-color: var(--line); }
+}
+
+.hint-ocr { margin-top: 4px; }
+
 /* ---------- 영수증 크게 보기 ---------- */
 .viewer {
   position: fixed;

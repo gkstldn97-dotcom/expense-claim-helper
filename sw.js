@@ -1,14 +1,16 @@
 /* sw.js — 오프라인에서도 열리도록 앱 껍데기를 캐시합니다. */
-const CACHE = 'expense-claim-v1';
+const CACHE = 'expense-claim-v2';
 
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './ocr.js',
   './xlsx.js',
   './pptx.js',
   './vendor/jszip.min.js',
+  './vendor/tesseract/tesseract.min.js',
   './assets/base.xlsx',
   './assets/base.pptx',
   './manifest.webmanifest',
